@@ -6,7 +6,7 @@ A manager creates a **personal brief link** for a client. The client opens it, s
 **4 questions with buttons** (service, budget, meeting day, time). The manager gets a **lead card** right away, and an
 **admin panel** inside the bot covers stats, broadcasts, editable answer options, team access and CSV export.
 
-Python 3.10+ (tested on 3.14) · aiogram 3 · SQLAlchemy 2 (async) · SQLite or PostgreSQL · English + Ukrainian · 23 automated tests
+Python 3.10+ (tested on 3.14) · aiogram 3 · SQLAlchemy 2 (async) · SQLite or PostgreSQL · English + Ukrainian · 24 automated tests
 
 | Manager creates a link | Client: personal greeting + step 1 | Manager gets the lead |
 |---|---|---|
@@ -55,8 +55,9 @@ button is the bot's actual output. Names and data are fictional.*
 **Robustness**
 - Free text where a button is expected → a hint and the step is shown again; stickers/photos where text is expected →
   format hint; stale buttons on old messages → a short alert instead of a broken state.
-- Language follows the user's Telegram setting (EN/UK); answers are stored language-neutral, so a Ukrainian-speaking
-  client and an English-speaking manager each read them in their own language.
+- English by default; `BOT_LANGUAGE=uk` switches everyone to Ukrainian, `BOT_LANGUAGE=auto` follows each user's
+  Telegram language. Answers are stored language-neutral, so in auto mode a Ukrainian-speaking client and an
+  English-speaking manager each read them in their own language.
 - A global error handler logs the traceback and tells the user to retry instead of going silent.
 
 ## Run
@@ -79,7 +80,7 @@ To try both roles with a single Telegram account, set `ALLOW_SELF_BRIEF=true` (d
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                                    # 23 tests, SQLite
+pytest -q                                    # 24 tests, SQLite
 TEST_DATABASE_URL=postgresql+asyncpg://... pytest -q   # same suite on PostgreSQL
 ```
 

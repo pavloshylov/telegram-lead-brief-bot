@@ -22,10 +22,20 @@ ADMIN_ID = 100
 
 @pytest_asyncio.fixture
 async def env(tmp_path):
-    """Fresh database + dispatcher + fake Telegram for every test.
+    """Fresh database + dispatcher + fake Telegram, each user in their Telegram language (BOT_LANGUAGE=auto)."""
+    async for harness in _make_env(tmp_path, language="auto"):
+        yield harness
 
-    TEST_DATABASE_URL lets the same suite run against PostgreSQL.
-    """
+
+@pytest_asyncio.fixture
+async def env_en(tmp_path):
+    """Same, with the default BOT_LANGUAGE=en: everyone gets English."""
+    async for harness in _make_env(tmp_path, language="en"):
+        yield harness
+
+
+async def _make_env(tmp_path, language: str):
+    """TEST_DATABASE_URL lets the same suite run against PostgreSQL."""
     url = os.environ.get("TEST_DATABASE_URL") or f"sqlite+aiosqlite:///{(tmp_path / 'test.db').as_posix()}"
     engine = make_engine(url)
     if os.environ.get("TEST_DATABASE_URL"):
@@ -39,7 +49,7 @@ async def env(tmp_path):
         await repo.seed_defaults(session)
         await session.commit()
     settings = Settings(bot_token="42:TEST", admin_ids=frozenset({ADMIN_ID}), company_name="Northwind Studio",
-                        broadcast_rate=0)
+                        broadcast_rate=0, language=language)
     api = FakeTelegram()
     harness = Harness(build_dispatcher(settings, session_maker), api)
     harness.session_maker = session_maker

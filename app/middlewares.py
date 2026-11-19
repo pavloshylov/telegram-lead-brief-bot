@@ -31,14 +31,16 @@ class ContextMiddleware(BaseMiddleware):
             data["settings"] = self.settings
             data["session_maker"] = self.session_maker
             if tg_user is not None and not tg_user.is_bot:
-                lang = pick_lang(tg_user.language_code)
+                lang = self.settings.language
+                if lang == "auto":
+                    lang = pick_lang(tg_user.language_code)
                 data["user"] = await repo.upsert_user(
                     session, tg_user.id, tg_user.username, tg_user.full_name, lang
                 )
                 data["t"] = Translator(lang)
             else:
                 data["user"] = None
-                data["t"] = Translator("en")
+                data["t"] = Translator("en" if self.settings.language == "auto" else self.settings.language)
             try:
                 result = await handler(event, data)
             except Exception:

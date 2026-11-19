@@ -198,6 +198,18 @@ async def test_ukrainian_client_english_manager(env, admin):
     assert 'href="tg://user?id=203"' in lead and "no public @username" in lead
 
 
+async def test_default_language_is_english_for_everyone(env_en):
+    manager = env_en.user(100, "Max", "max_northwind", lang="uk")
+    await env_en.start(manager)
+    assert "You're a manager at Northwind Studio" in env_en.last(manager).text
+    code = await make_brief(env_en, manager)
+    olena = env_en.user(203, "Олена", None, lang="uk")
+    await env_en.start(olena, f"b_{code}")
+    assert env_en.last(olena).text.startswith("Hi Anna Kowalska!")
+    await env_en.click(olena, "▶️ Start")
+    assert "Step 1 of 4" in env_en.last(olena).text
+
+
 # ---------------------------------------------------------------- manager tools
 
 async def test_lead_status_and_list(env, admin):

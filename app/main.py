@@ -32,13 +32,17 @@ def build_dispatcher(
 
 
 async def set_commands(bot: Bot, settings: Settings) -> None:
+    fixed = settings.language != "auto"
     for lang in LANGS:
-        t = Translator(lang)
-        base = [BotCommand(command=c, description=t(f"cmd_{c}")) for c in ("start", "help", "cancel")]
         code = None if lang == "en" else lang
+        if fixed and code is not None:  # one language for everyone: drop per-language command lists
+            await bot.delete_my_commands(scope=BotCommandScopeDefault(), language_code=code)
+            continue
+        t = Translator(settings.language if fixed else lang)
+        base = [BotCommand(command=c, description=t(f"cmd_{c}")) for c in ("start", "help", "cancel")]
         await bot.set_my_commands(base, scope=BotCommandScopeDefault(), language_code=code)
     for admin_id in settings.admin_ids:  # admins also see /admin
-        t = Translator("en")
+        t = Translator(settings.language if fixed else "en")
         commands = [BotCommand(command=c, description=t(f"cmd_{c}")) for c in ("start", "admin", "help", "cancel")]
         try:
             await bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=admin_id))

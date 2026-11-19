@@ -271,7 +271,7 @@ async def main() -> None:
         await repo.seed_defaults(session)
         await session.commit()
     settings = Settings(bot_token="42:DEMO", admin_ids=frozenset({ADMIN_ID}), company_name="Northwind Studio",
-                        broadcast_rate=20)
+                        broadcast_rate=20, language="auto")  # auto: to show the Ukrainian screen too
     env = Harness(build_dispatcher(settings, session_maker), FakeTelegram())
     shots = await scenario(env)
     await engine.dispose()

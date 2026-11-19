@@ -28,6 +28,13 @@ def _parse_ids(raw: str) -> frozenset[int]:
     return frozenset(ids)
 
 
+def _parse_language(raw: str | None) -> str:
+    value = (raw or "en").strip().lower()
+    if value not in {"en", "uk", "auto"}:
+        raise SystemExit(f"BOT_LANGUAGE must be en, uk or auto, got {raw!r}")
+    return value
+
+
 def _parse_bool(raw: str | None) -> bool:
     return (raw or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -39,6 +46,8 @@ class Settings:
     database_url: str = "sqlite+aiosqlite:///data/bot.db"
     company_name: str = "Northwind Studio"
     timezone: str = "Europe/Kyiv"
+    # "en" / "uk" = everyone gets that language; "auto" = each user's Telegram language (uk -> Ukrainian, else English)
+    language: str = "en"
     # Demo only: lets a manager open their own brief link (to try both roles with one account).
     allow_self_brief: bool = False
     broadcast_rate: float = 20.0  # messages per second, below Telegram's ~30/s limit
@@ -58,6 +67,7 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         database_url=env.get("DATABASE_URL") or Settings.database_url,
         company_name=env.get("COMPANY_NAME") or Settings.company_name,
         timezone=env.get("TIMEZONE") or Settings.timezone,
+        language=_parse_language(env.get("BOT_LANGUAGE")),
         allow_self_brief=_parse_bool(env.get("ALLOW_SELF_BRIEF")),
         broadcast_rate=float(env.get("BROADCAST_RATE") or Settings.broadcast_rate),
     )
