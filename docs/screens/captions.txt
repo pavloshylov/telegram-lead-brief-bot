@@ -1,0 +1,9 @@
+01_manager_link: Manager creates a personal brief link
+02_client_step1: Client opens the link: personal greeting + step 1
+03_client_confirm: Typed date and time are validated, then confirmed
+04_client_sent: Sent, and the link can't be answered twice
+05_manager_lead: Manager instantly gets the lead card
+06_client_ukrainian: Same flow in Ukrainian (from Telegram language)
+07_admin_stats: Admin panel: stats
+08_admin_catalog: Admin edits answer options without code
+09_admin_broadcast: Broadcast with preview, throttling and blocked-user handling
