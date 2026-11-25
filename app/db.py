@@ -71,6 +71,44 @@ class Brief(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Package(Base):
+    """A paid session the client can reserve after the brief. Prices are edited by the admin."""
+
+    __tablename__ = "packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(32))  # Telegram invoice title limit
+    description: Mapped[str] = mapped_column(String(255))  # Telegram invoice description limit
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)  # card price in minor units (0 = no card option)
+    price_stars: Mapped[int] = mapped_column(Integer, default=0)  # Stars price (0 = no Stars option)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Payment(Base):
+    """One payment attempt. Title and price are snapshots, so later package edits never change what was paid.
+
+    status: pending -> paid -> refunded (or pending -> cancelled when the client chose again).
+    """
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    brief_id: Mapped[int] = mapped_column(Integer, ForeignKey("briefs.id"), index=True)
+    package_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("packages.id", ondelete="SET NULL"))
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    title: Mapped[str] = mapped_column(String(32))
+    method: Mapped[str] = mapped_column(String(16))  # provider | stars
+    currency: Mapped[str] = mapped_column(String(8))  # ISO code, or XTR for Stars
+    amount: Mapped[int] = mapped_column(Integer)  # minor units (cents), or whole Stars
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    telegram_charge_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    provider_charge_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ManagerInvite(Base):
     """One-time link that turns whoever opens it into a manager."""
 

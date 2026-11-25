@@ -9,9 +9,9 @@ from datetime import date, timedelta
 from html import escape
 from zoneinfo import ZoneInfo
 
-from app.db import Brief, User
+from app.db import Brief, Payment, User
 from app.texts import Translator
-from app.utils import format_date, user_link
+from app.utils import format_date, format_money, user_link
 
 TIME_SLOTS = ("morning", "afternoon", "evening")
 LEAD_ICONS = {"new": "🆕", "contacted": "📞", "closed": "✅"}
@@ -105,7 +105,30 @@ def new_lead_text(t: Translator, brief: Brief, client: User) -> str:
     return text
 
 
-def lead_card_text(t: Translator, brief: Brief, client: User | None, link: str, tz: str) -> str:
+def payment_line(t: Translator, payment: Payment) -> str:
+    key = "lead_refunded" if payment.status == "refunded" else "lead_paid"
+    return t(key, title=escape(payment.title), price=format_money(payment.amount, payment.currency))
+
+
+def revenue_lines(t: Translator, lines: list) -> str:
+    """One line per (method, currency): net revenue, number of paid and refunded payments."""
+    if not lines:
+        return t("revenue_none")
+    return "\n".join(
+        t(
+            "revenue_line",
+            label=t(f"method_{line.method}") + ("" if line.currency == "XTR" else f" {line.currency}"),
+            net=format_money(line.net_amount, line.currency),
+            count=line.paid_count,
+            refunded=line.refunded_count,
+        )
+        for line in lines
+    )
+
+
+def lead_card_text(
+    t: Translator, brief: Brief, client: User | None, link: str, tz: str, payment: Payment | None = None
+) -> str:
     created = brief.created_at
     if created.tzinfo is None:  # SQLite returns naive datetimes
         created = created.replace(tzinfo=ZoneInfo("UTC"))
@@ -123,4 +146,6 @@ def lead_card_text(t: Translator, brief: Brief, client: User | None, link: str, 
         text += "\n" + t("lead_answered_by", client_link=user_link(client.id, client.first_name, client.username))
     text += "\n\n" + answers_block(t, brief)
     text += "\n\n" + t("lead_status_set", status=t(f"status_{brief.lead_status}"))
+    if payment is not None:
+        text += "\n" + payment_line(t, payment)
     return text

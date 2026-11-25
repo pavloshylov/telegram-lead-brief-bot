@@ -7,3 +7,8 @@
 07_admin_stats: Admin panel: stats
 08_admin_catalog: Admin edits answer options without code
 09_admin_broadcast: Broadcast with preview, throttling and blocked-user handling
+10_client_offer: After the brief: an optional paid session
+11_client_invoice: Invoice: pay by card or with Telegram Stars
+12_client_paid: Payment confirmed to the client
+13_manager_paid: Manager is notified, the lead card shows the payment
+14_admin_payments: Admin: revenue, packages, payments CSV, Stars refunds

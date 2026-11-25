@@ -6,6 +6,7 @@ import csv
 import io
 import logging
 import time
+from html import escape
 from dataclasses import dataclass, field
 
 from aiogram import Bot
@@ -15,8 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import keyboards as kb
 from app import repo
-from app.db import Brief, User
+from app.db import Brief, Payment, User
 from app.texts import Translator
+from app.utils import format_money, user_link
 from app.views import format_day, format_time, new_lead_text
 
 log = logging.getLogger(__name__)
@@ -50,6 +52,29 @@ async def notify_manager(bot: Bot, session: AsyncSession, brief: Brief, client: 
         await repo.mark_blocked(session, manager.id)
     except TelegramAPIError:
         log.exception("could not notify manager %s about brief #%s", manager.id, brief.id)
+    return False
+
+
+async def notify_manager_paid(bot: Bot, session: AsyncSession, brief: Brief, client: User, payment: Payment) -> bool:
+    manager = await session.get(User, brief.manager_id)
+    if manager is None:
+        return False
+    t = Translator(manager.language)
+    text = t(
+        "pay_manager_notice",
+        client_link=user_link(client.id, client.first_name, client.username),
+        title=escape(payment.title),
+        price=format_money(payment.amount, payment.currency),
+        id=brief.id,
+    )
+    try:
+        await bot.send_message(manager.id, text, reply_markup=kb.lead_actions(t, brief, client, with_back=False))
+        return True
+    except TelegramForbiddenError:
+        log.warning("manager %s blocked the bot; payment %s saved without notification", manager.id, payment.id)
+        await repo.mark_blocked(session, manager.id)
+    except TelegramAPIError:
+        log.exception("could not notify manager %s about payment %s", manager.id, payment.id)
     return False
 
 
@@ -143,6 +168,12 @@ CSV_COLUMNS = [
 ]
 
 
+def csv_text(value: str | None) -> str:
+    """Text typed by a person goes into a spreadsheet: a leading = + - @ would be run as a formula (CSV injection)."""
+    value = value or ""
+    return "'" + value if value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+
+
 def briefs_csv(rows: list[tuple[Brief, User]]) -> bytes:
     t = Translator("en")
     buf = io.StringIO()
@@ -152,17 +183,39 @@ def briefs_csv(rows: list[tuple[Brief, User]]) -> bytes:
         writer.writerow([
             brief.id,
             brief.created_at.strftime("%Y-%m-%d %H:%M"),
-            manager.first_name,
-            brief.client_name,
-            brief.office,
+            csv_text(manager.first_name),
+            csv_text(brief.client_name),
+            csv_text(brief.office),
             brief.tone,
             brief.status,
             brief.lead_status if brief.status == "completed" else "",
             brief.client_id or "",
-            brief.service or "",
-            brief.budget or "",
+            csv_text(brief.service),
+            csv_text(brief.budget),
             format_day(brief.meet_day, t) if brief.meet_day else "",
             format_time(brief.meet_time, t) if brief.meet_time else "",
             brief.completed_at.strftime("%Y-%m-%d %H:%M") if brief.completed_at else "",
         ])
     return ("﻿" + buf.getvalue()).encode("utf-8")  # BOM so Excel opens UTF-8 correctly
+
+
+PAYMENT_COLUMNS = [
+    "payment_id", "created_at_utc", "paid_at_utc", "brief_id", "client_name", "client_telegram_id",
+    "package", "method", "currency", "amount", "status", "refunded_at_utc", "telegram_charge_id",
+]
+
+
+def payments_csv(rows: list[tuple[Payment, Brief]]) -> bytes:
+    """Amounts are in major units (25.00 USD, 250 Stars)."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(PAYMENT_COLUMNS)
+    stamp = lambda value: value.strftime("%Y-%m-%d %H:%M") if value else ""  # noqa: E731
+    for payment, brief in rows:
+        amount = payment.amount if payment.currency == "XTR" else f"{payment.amount / 100:.2f}"
+        writer.writerow([
+            payment.id, stamp(payment.created_at), stamp(payment.paid_at), brief.id, csv_text(brief.client_name), payment.user_id,
+            csv_text(payment.title), payment.method, payment.currency, amount, payment.status, stamp(payment.refunded_at),
+            payment.telegram_charge_id or "",
+        ])
+    return ("﻿" + buf.getvalue()).encode("utf-8")

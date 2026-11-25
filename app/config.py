@@ -51,6 +51,21 @@ class Settings:
     # Demo only: lets a manager open their own brief link (to try both roles with one account).
     allow_self_brief: bool = False
     broadcast_rate: float = 20.0  # messages per second, below Telegram's ~30/s limit
+    # Payments (optional). Empty provider token = card payments off; PAYMENTS_STARS=on enables Telegram Stars.
+    payments_provider_token: str = field(default="", repr=False)
+    payments_stars: bool = False
+    payments_currency: str = "USD"  # ISO 4217 code with 2 decimals (USD, EUR, PLN, ...); used with the provider token
+    # Talk to Telegram's separate test environment (test accounts, test bots, no real money); the token must come from
+    # @BotFather on the test server.
+    telegram_test_env: bool = False
+
+    @property
+    def card_payments(self) -> bool:
+        return bool(self.payments_provider_token)
+
+    @property
+    def payments_enabled(self) -> bool:
+        return self.card_payments or self.payments_stars
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids
@@ -70,4 +85,8 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         language=_parse_language(env.get("BOT_LANGUAGE")),
         allow_self_brief=_parse_bool(env.get("ALLOW_SELF_BRIEF")),
         broadcast_rate=float(env.get("BROADCAST_RATE") or Settings.broadcast_rate),
+        payments_provider_token=env.get("PAYMENTS_PROVIDER_TOKEN", "").strip(),
+        payments_stars=_parse_bool(env.get("PAYMENTS_STARS")),
+        payments_currency=(env.get("PAYMENTS_CURRENCY") or Settings.payments_currency).strip().upper(),
+        telegram_test_env=_parse_bool(env.get("TELEGRAM_TEST_ENV")),
     )

@@ -155,7 +155,7 @@ async def lead_action(
     link = deep_link((await bot.me()).username, f"b_{brief.code}")
     await safe_edit(
         cb.message,
-        lead_card_text(t, brief, client, link, settings.timezone),
+        lead_card_text(t, brief, client, link, settings.timezone, await repo.brief_payment(session, brief.id)),
         kb.lead_actions(t, brief, client, with_back=with_back),
     )
 

@@ -25,6 +25,10 @@ class AdminInput(StatesGroup):
     broadcast_message = State()
     broadcast_confirm = State()
     catalog_label = State()
+    pkg_title = State()
+    pkg_description = State()
+    pkg_price = State()
+    pkg_stars = State()
 
 
 # Steps where the client must use buttons (free text gets a hint).
@@ -60,3 +64,10 @@ class ClientCb(CallbackData, prefix="cl"):
 class AdminCb(CallbackData, prefix="adm"):
     action: str
     value: str = ""
+
+
+class PayCb(CallbackData, prefix="pay"):
+    action: str  # menu | pkg | m (method) | cancel
+    brief_id: int
+    package_id: int = 0
+    method: str = ""  # provider | stars

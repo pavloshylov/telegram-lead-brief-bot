@@ -49,3 +49,22 @@ def test_day_options_business_week():
     assert values["next_week"] == "w:2026-11-23:2026-11-27"
     thursday = date(2026, 11, 19)
     assert "this_week" not in dict(day_options(thursday))
+
+
+def test_csv_text_blocks_spreadsheet_formulas():
+    from app.services import csv_text
+
+    assert csv_text('=HYPERLINK("http://x","y")') == '\'=HYPERLINK("http://x","y")'
+    assert csv_text("+1") == "'+1" and csv_text("-2") == "'-2" and csv_text("@SUM(A1)") == "'@SUM(A1)"
+    assert csv_text("Anna") == "Anna" and csv_text("") == "" and csv_text(None) == ""
+
+
+def test_test_environment_uses_the_test_bot_api_url():
+    from app.config import Settings
+    from app.main import make_bot
+
+    token = "1:" + "A" * 35
+    prod = make_bot(Settings(bot_token=token))
+    test = make_bot(Settings(bot_token=token, telegram_test_env=True))
+    assert prod.session.api.base.format(token="T", method="getMe") == "https://api.telegram.org/botT/getMe"
+    assert test.session.api.base.format(token="T", method="getMe") == "https://api.telegram.org/botT/test/getMe"

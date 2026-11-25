@@ -387,6 +387,11 @@ UK: dict[str, str] = {
     "export_caption": "📥 Брифів: {n}, вивантажено {date}.",
 }
 
+from app.texts_payments import EN_PAYMENTS, UK_PAYMENTS  # noqa: E402  (kept in a separate module for readability)
+
+EN.update(EN_PAYMENTS)
+UK.update(UK_PAYMENTS)
+
 LANGS = {"en": EN, "uk": UK}
 
 WEEKDAYS = {

@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -31,6 +34,22 @@ def build_dispatcher(
     return dp
 
 
+def make_bot(settings: Settings) -> Bot:
+    session = None
+    if settings.telegram_test_env:  # https://core.telegram.org/bots/features#testing-your-bot
+        session = AiohttpSession(
+            api=TelegramAPIServer(
+                base="https://api.telegram.org/bot{token}/test/{method}",
+                file="https://api.telegram.org/file/bot{token}/test/{path}",
+            )
+        )
+    return Bot(
+        settings.bot_token,
+        session=session,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True),
+    )
+
+
 async def set_commands(bot: Bot, settings: Settings) -> None:
     fixed = settings.language != "auto"
     for lang in LANGS:
@@ -52,7 +71,7 @@ async def set_commands(bot: Bot, settings: Settings) -> None:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    settings = load_settings()
+    settings = load_settings(os.environ.get("ENV_FILE") or ".env")  # ENV_FILE: run another config side by side
     engine = make_engine(settings.database_url)
     await init_db(engine)
     session_maker = make_session_maker(engine)
@@ -60,7 +79,7 @@ async def main() -> None:
         await repo.seed_defaults(session)
         await session.commit()
 
-    bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
+    bot = make_bot(settings)
     dp = build_dispatcher(settings, session_maker)
     await set_commands(bot, settings)
     me = await bot.me()

@@ -80,3 +80,29 @@ def user_link(user_id: int, name: str, username: str | None) -> str:
 
 def clean_text(text: str | None) -> str:
     return " ".join((text or "").split())
+
+
+def format_money(amount: int, currency: str) -> str:
+    """Minor units -> text. Stars (XTR) are whole numbers; everything else has 2 decimals."""
+    if currency == "XTR":
+        return f"{amount} ⭐"
+    return f"{amount / 100:.2f} {currency}"
+
+
+def parse_price(text: str | None) -> int | None:
+    """'25', '25.5', '25,50' -> cents. None if it is not a price from 0 to 10000 (0 = not offered)."""
+    value = (text or "").strip().replace(",", ".")
+    try:
+        number = round(float(value) * 100)
+    except (ValueError, OverflowError):
+        return None
+    return number if 0 <= number <= 1_000_000 and len(value) <= 10 else None
+
+
+def parse_stars(text: str | None) -> int | None:
+    """Whole Stars, 0 = no Stars option. None if invalid (negative, text, more than 100000)."""
+    value = (text or "").strip()
+    if not value.isdigit():
+        return None
+    number = int(value)
+    return number if number <= 100_000 else None

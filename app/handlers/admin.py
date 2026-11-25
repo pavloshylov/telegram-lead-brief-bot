@@ -22,6 +22,7 @@ from app.services import briefs_csv, safe_edit, start_broadcast
 from app.states import AdminCb, AdminInput
 from app.texts import Translator, all_variants
 from app.utils import clean_text, deep_link
+from app.views import revenue_lines
 
 router = Router(name="admin")
 router.message.filter(IsAdmin())
@@ -62,6 +63,9 @@ async def stats(cb: CallbackQuery, session: AsyncSession, settings: Settings, t:
         services=services,
         top_managers=managers,
     )
+    if settings.payments_enabled:
+        lines = await repo.revenue(session)
+        text += t("stats_revenue", lines=revenue_lines(t, lines))
     await safe_edit(cb.message, text, kb.admin_back(t))
     await cb.answer()
 

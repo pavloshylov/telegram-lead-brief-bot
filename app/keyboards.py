@@ -6,8 +6,10 @@ from urllib.parse import quote
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.db import Brief, CatalogItem, User
-from app.states import AdminCb, ClientCb, LeadCb, MgrCb, OfficeCb, ToneCb
+from app.config import Settings
+from app.db import Brief, CatalogItem, Package, Payment, User
+from app.payments import offered_methods, price_of, price_summary
+from app.states import AdminCb, ClientCb, LeadCb, MgrCb, OfficeCb, PayCb, ToneCb
 from app.texts import Translator
 from app.views import TIME_SLOTS, lead_icon
 
@@ -136,6 +138,37 @@ def client_confirm(t: Translator, brief_id: int) -> InlineKeyboardMarkup:
     return kb.adjust(1).as_markup()
 
 
+# ---------------------------------------------------------------- client payments
+
+def pay_offer(t: Translator, brief_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text=t("btn_pay_offer"), callback_data=PayCb(action="menu", brief_id=brief_id))
+    return kb.as_markup()
+
+
+def pay_packages(t: Translator, brief_id: int, packages: list[Package], settings: Settings) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for package in packages:
+        kb.button(
+            text=f"{package.title} · {price_summary(package, settings)}",
+            callback_data=PayCb(action="pkg", brief_id=brief_id, package_id=package.id),
+        )
+    kb.button(text=t("btn_pay_not_now"), callback_data=PayCb(action="cancel", brief_id=brief_id))
+    return kb.adjust(1).as_markup()
+
+
+def pay_methods(t: Translator, brief_id: int, package: Package, settings: Settings) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for method in offered_methods(package, settings):
+        key = "btn_pay_stars" if method == "stars" else "btn_pay_card"
+        kb.button(
+            text=t(key, price=price_of(package, method, settings)),
+            callback_data=PayCb(action="m", brief_id=brief_id, package_id=package.id, method=method),
+        )
+    kb.button(text=t("btn_back"), callback_data=PayCb(action="menu", brief_id=brief_id))
+    return kb.adjust(1).as_markup()
+
+
 # ---------------------------------------------------------------- admin
 
 def _adm(text: str, action: str, value: str = "") -> InlineKeyboardButton:
@@ -147,7 +180,7 @@ def admin_menu(t: Translator) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [_adm(t("btn_stats"), "stats"), _adm(t("btn_broadcast"), "bc")],
             [_adm(t("btn_catalogs"), "cat"), _adm(t("btn_team"), "team")],
-            [_adm(t("btn_export"), "export")],
+            [_adm(t("btn_export"), "export"), _adm(t("btn_payments"), "pay")],
         ]
     )
 
@@ -207,4 +240,50 @@ def team(t: Translator, managers: list[User]) -> InlineKeyboardMarkup:
 def team_remove_confirm(t: Translator, user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[_adm(t("btn_yes_remove"), "teamrmok", str(user_id)), _adm(t("btn_cancel"), "team")]]
+    )
+
+
+# ---------------------------------------------------------------- admin payments
+
+def payments_menu(t: Translator) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [_adm(t("btn_pay_csv"), "paycsv"), _adm(t("btn_packages"), "pkgs")],
+            [_adm(t("btn_refunds"), "refunds")],
+            [_adm(t("btn_back"), "menu")],
+        ]
+    )
+
+
+def packages_list(t: Translator, packages: list[Package]) -> InlineKeyboardMarkup:
+    rows = [[_adm(("" if p.is_active else "🙈 ") + p.title, "pkg", str(p.id))] for p in packages]
+    rows.append([_adm(t("btn_add"), "pkgadd"), _adm(t("btn_back"), "pay")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def package_item(t: Translator, package: Package) -> InlineKeyboardMarkup:
+    toggle = t("btn_hide") if package.is_active else t("btn_show")
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [_adm(toggle, "pkgtoggle", str(package.id)), _adm(t("btn_edit_prices"), "pkgedit", str(package.id))],
+            [_adm(t("btn_delete"), "pkgdel", str(package.id)), _adm(t("btn_back"), "pkgs")],
+        ]
+    )
+
+
+def package_delete_confirm(t: Translator, package: Package) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[_adm(t("btn_yes_delete"), "pkgdelok", str(package.id)), _adm(t("btn_cancel"), "pkg", str(package.id))]]
+    )
+
+
+def refunds_list(t: Translator, payments: list[Payment]) -> InlineKeyboardMarkup:
+    rows = [[_adm(f"↩️ #{p.id} {p.title} · {p.amount} ⭐", "refund", str(p.id))] for p in payments]
+    rows.append([_adm(t("btn_back"), "pay")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def refund_confirm(t: Translator, payment: Payment) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[_adm(t("btn_yes_refund"), "refundok", str(payment.id)), _adm(t("btn_cancel"), "refunds")]]
     )

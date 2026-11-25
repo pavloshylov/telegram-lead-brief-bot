@@ -11,14 +11,14 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import keyboards as kb
-from app import repo
+from app import payments, repo
 from app.config import Settings
 from app.db import Brief, User
 from app.services import notify_manager, safe_edit
 from app.states import CLIENT_BUTTON_STEPS, ClientBrief, ClientCb
 from app.texts import Translator
 from app.utils import check_date, clean_text, example_date, now_local, parse_date, parse_time, progress_bar
-from app.views import TIME_SLOTS, brief_summary, day_is_today, day_options, summary
+from app.views import TIME_SLOTS, brief_summary, day_is_today, day_options, payment_line, summary
 
 router = Router(name="client")
 
@@ -47,7 +47,14 @@ async def open_brief(
     manager_name = escape(manager.first_name if manager else settings.company_name)
     if brief.status == "completed":
         if brief.client_id == user.id:
-            await message.answer(t("already_answered_self", manager=manager_name, summary=brief_summary(t, brief)))
+            text = t("already_answered_self", manager=manager_name, summary=brief_summary(t, brief))
+            paid = await repo.brief_payment(session, brief.id)
+            if paid is not None:
+                await message.answer(text + "\n\n" + payment_line(t, paid))
+            elif await payments.available_packages(session, settings):
+                await message.answer(text + t("pay_offer_hint"), reply_markup=kb.pay_offer(t, brief.id))
+            else:
+                await message.answer(text)
         else:
             await message.answer(t("already_answered_other", company=escape(settings.company_name)))
         return
@@ -190,7 +197,7 @@ async def client_button(
         if any(key not in data for key in ANSWER_KEYS):
             await go("service")
         else:
-            await submit(cb, state, session, user, t, bot, brief, data)
+            await submit(cb, state, session, user, settings, t, bot, brief, data)
             return  # submit answers the callback itself
     await cb.answer()
 
@@ -200,6 +207,7 @@ async def submit(
     state: FSMContext,
     session: AsyncSession,
     user: User,
+    settings: Settings,
     t: Translator,
     bot: Bot,
     brief: Brief,
@@ -215,10 +223,11 @@ async def submit(
     await session.refresh(brief)
     await state.clear()
     manager = await session.get(User, brief.manager_id)
-    await safe_edit(
-        cb.message,
-        t("sent", client=escape(brief.client_name), manager=escape(manager.first_name if manager else "")),
-    )
+    text = t("sent", client=escape(brief.client_name), manager=escape(manager.first_name if manager else ""))
+    if await payments.available_packages(session, settings):  # optional paid step, only when payments are on
+        await safe_edit(cb.message, text + t("pay_offer_hint"), kb.pay_offer(t, brief.id))
+    else:
+        await safe_edit(cb.message, text)
     await cb.answer()
     await notify_manager(bot, session, brief, user)
 

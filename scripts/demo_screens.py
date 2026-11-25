@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 from app import repo  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.db import init_db, make_engine, make_session_maker  # noqa: E402
+from app.handlers import routers  # noqa: E402
 from app.main import build_dispatcher  # noqa: E402
 from app.services import running_broadcasts  # noqa: E402
 from tests.fake_telegram import Harness, FakeTelegram  # noqa: E402
@@ -160,6 +161,32 @@ async def scenario(env: Harness) -> list[Snapshot]:
     return shots
 
 
+async def payments_scenario(env: Harness) -> list[Snapshot]:
+    """Optional paid step. Runs on the fake Bot API, so the payment itself is simulated (not a real charge)."""
+    shots: list[Snapshot] = []
+    max_ = env.user(ADMIN_ID, "Max", "max_northwind")
+    anna = env.user(201, "Anna", "anna_k")
+    await env.start(max_)
+    code = await make_brief(env, max_, "Anna Kowalska", "😊 Friendly", "Warsaw office")
+    await answer(env, anna, code, "Data & analytics", "$5k – 15k", "Tomorrow", "Afternoon (12–17)")
+    shots.append(snap(env, anna, "10_client_offer", "After the brief: an optional paid session", last_n=1))
+
+    await env.click(anna, "💳 Reserve a paid session")
+    await env.click(anna, "Paid consultation · 25.00 USD / 250 ⭐")
+    await env.click(anna, "💳 Card · 25.00 USD")
+    invoice = env.last(anna)
+    shots.append(snap(env, anna, "11_client_invoice", "Invoice: pay by card or with Telegram Stars", last_n=3))
+
+    await env.pay(anna, invoice)
+    shots.append(snap(env, anna, "12_client_paid", "Payment confirmed to the client", last_n=2))
+    shots.append(snap(env, max_, "13_manager_paid", "Manager is notified, the lead card shows the payment", last_n=2))
+
+    await env.send(max_, "/admin")
+    await env.click(max_, "💳 Payments")
+    shots.append(snap(env, max_, "14_admin_payments", "Admin: revenue, packages, payments CSV, Stars refunds", last_n=2))
+    return shots
+
+
 # ---------------------------------------------------------------- rendering
 
 CSS = """
@@ -262,19 +289,35 @@ def screenshot(html_path: Path, png_path: Path, profile: Path) -> None:
     )
 
 
-async def main() -> None:
-    tmp = Path(tempfile.mkdtemp(prefix="brief_demo_"))
-    engine = make_engine(f"sqlite+aiosqlite:///{(tmp / 'demo.db').as_posix()}")
+async def run_scenario(tmp: Path, name: str, scenario_fn, **extra) -> list[Snapshot]:
+    engine = make_engine(f"sqlite+aiosqlite:///{(tmp / f'{name}.db').as_posix()}")
     await init_db(engine)
     session_maker = make_session_maker(engine)
     async with session_maker() as session:
         await repo.seed_defaults(session)
         await session.commit()
     settings = Settings(bot_token="42:DEMO", admin_ids=frozenset({ADMIN_ID}), company_name="Northwind Studio",
-                        broadcast_rate=20, language="auto")  # auto: to show the Ukrainian screen too
+                        broadcast_rate=20, language="auto", **extra)  # auto: to show the Ukrainian screen too
     env = Harness(build_dispatcher(settings, session_maker), FakeTelegram())
-    shots = await scenario(env)
-    await engine.dispose()
+    env.settings = settings
+    try:
+        return await scenario_fn(env)
+    finally:
+        await engine.dispose()
+        for router in routers():  # module-level routers belong to one dispatcher at a time
+            router._parent_router = None
+
+
+async def main() -> None:
+    """`python scripts/demo_screens.py` renders everything; `... payments` only the payment screens."""
+    only_payments = "payments" in sys.argv[1:]
+    tmp = Path(tempfile.mkdtemp(prefix="brief_demo_"))
+    shots: list[Snapshot] = []
+    if not only_payments:
+        shots += await run_scenario(tmp, "demo", scenario)
+    shots += await run_scenario(
+        tmp, "demo_payments", payments_scenario, payments_provider_token="TEST:demo-provider", payments_stars=True
+    )
 
     OUT.mkdir(parents=True, exist_ok=True)
     html_dir = tmp / "html"
@@ -285,7 +328,14 @@ async def main() -> None:
         page.write_text(render_html(shot, clock), encoding="utf-8")
         screenshot(page, OUT / f"{shot.name}.png", tmp / "chrome")
         print(f"{shot.name}.png  {shot.title}")
-    (OUT / "captions.txt").write_text("\n".join(f"{s.name}: {s.title}" for s in shots) + "\n", encoding="utf-8")
+    captions = OUT / "captions.txt"
+    known = {}
+    if captions.exists():
+        for line in captions.read_text(encoding="utf-8").splitlines():
+            name, _, title = line.partition(": ")
+            known[name] = title
+    known.update({s.name: s.title for s in shots})
+    captions.write_text("".join(f"{n}: {known[n]}\n" for n in sorted(known)), encoding="utf-8")
     shutil.rmtree(tmp, ignore_errors=True)
 
 

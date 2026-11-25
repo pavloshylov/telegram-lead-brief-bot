@@ -16,14 +16,17 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods import (
     AnswerCallbackQuery,
+    AnswerPreCheckoutQuery,
     CopyMessage,
     EditMessageReplyMarkup,
     EditMessageText,
     GetMe,
+    RefundStarPayment,
     SendDocument,
+    SendInvoice,
     SendMessage,
     TelegramMethod,
 )
@@ -33,8 +36,10 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
     MessageId,
+    PreCheckoutQuery,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    SuccessfulPayment,
     Update,
     User,
 )
@@ -50,6 +55,7 @@ class Bubble:
     markup: InlineKeyboardMarkup | None = None
     document: tuple[str, bytes] | None = None
     edited: bool = False
+    invoice: dict[str, Any] | None = None  # set for sendInvoice messages
 
     def buttons(self) -> list[list[Any]]:
         return self.markup.inline_keyboard if self.markup else []
@@ -79,6 +85,12 @@ class FakeTelegram(BaseSession):
         self.blocked: set[int] = set()  # chats that "blocked the bot"
         self._ids = itertools.count(1000)
         self._callback_chat: dict[str, int] = {}
+        # payments
+        self.fail_invoices: str | None = None  # error text: sendInvoice is refused (e.g. bad provider token)
+        self.pre_checkout_answers: dict[str, tuple[bool, str | None]] = {}
+        self.star_charges: dict[str, int] = {}  # telegram_payment_charge_id -> user_id: Stars that can be refunded
+        self.refunded: list[str] = []
+        self.fail_refunds: str | None = None  # error text: refundStarPayment is refused
 
     async def close(self) -> None:
         return None
@@ -118,6 +130,13 @@ class FakeTelegram(BaseSession):
             bubble = self._add_bot_bubble(chat_id, method.caption or "", method.reply_markup)
             bubble.document = (doc.filename, doc.data)
             return self._message(bot, chat_id, bubble)
+        if isinstance(method, SendInvoice):
+            return self._send_invoice(bot, method)
+        if isinstance(method, AnswerPreCheckoutQuery):
+            self.pre_checkout_answers[method.pre_checkout_query_id] = (method.ok, method.error_message)
+            return True
+        if isinstance(method, RefundStarPayment):
+            return self._refund(method)
         if isinstance(method, AnswerCallbackQuery):
             if method.text:
                 self.chats[self._callback_chat.get(method.callback_query_id, 0)].alerts.append(
@@ -125,6 +144,59 @@ class FakeTelegram(BaseSession):
                 )
             return True
         return True  # SetMyCommands and other fire-and-forget calls
+
+    # ------------------------------------------------------------ payments (rules from core.telegram.org/bots/payments*)
+
+    def _send_invoice(self, bot: Bot, method: SendInvoice) -> Message:
+        """Enforces what the real Bot API enforces, so a wrong invoice fails here and not only in production."""
+
+        def refuse(text: str) -> None:
+            raise TelegramBadRequest(method=method, message=f"Bad Request: {text}")
+
+        if self.fail_invoices:
+            refuse(self.fail_invoices)
+        if not 1 <= len(method.title) <= 32:
+            refuse("invoice title length must be 1-32")
+        if not 1 <= len(method.description) <= 255:
+            refuse("invoice description length must be 1-255")
+        if not 1 <= len(method.payload.encode()) <= 128:
+            refuse("invoice payload must be 1-128 bytes")
+        total = sum(price.amount for price in method.prices)
+        if not method.prices or total <= 0 or any(price.amount < 0 for price in method.prices):
+            refuse("total price must be positive")
+        if method.currency == "XTR":
+            if method.provider_token:
+                refuse("provider token must be empty for payments in Telegram Stars")
+            if len(method.prices) != 1:
+                refuse("exactly one price item is allowed for payments in Telegram Stars")
+        elif not method.provider_token:
+            refuse("PAYMENT_PROVIDER_INVALID")
+        markup = method.reply_markup
+        if markup is not None:
+            first = markup.inline_keyboard[0][0] if markup.inline_keyboard and markup.inline_keyboard[0] else None
+            if first is None or not first.pay:
+                refuse("the first button must be a Pay button")
+        bubble = self._add_bot_bubble(method.chat_id, f"{method.title}\n{method.description}", markup)
+        bubble.invoice = {
+            "title": method.title,
+            "description": method.description,
+            "payload": method.payload,
+            "currency": method.currency,
+            "total": total,
+            "provider_token": method.provider_token or "",
+        }
+        return self._message(bot, method.chat_id, bubble)
+
+    def _refund(self, method: RefundStarPayment) -> bool:
+        if self.fail_refunds:
+            raise TelegramBadRequest(method=method, message=f"Bad Request: {self.fail_refunds}")
+        charge = method.telegram_payment_charge_id
+        if self.star_charges.get(charge) != method.user_id:
+            raise TelegramBadRequest(method=method, message="Bad Request: CHARGE_NOT_FOUND")
+        if charge in self.refunded:
+            raise TelegramBadRequest(method=method, message="Bad Request: CHARGE_ALREADY_REFUNDED")
+        self.refunded.append(charge)
+        return True
 
     # ------------------------------------------------------------ helpers
 
@@ -211,6 +283,48 @@ class Harness:
                     await self._press(user, bubble, button.callback_data)
                     return
         raise AssertionError(f"button {button_text!r} not on that message")
+
+    async def pay(self, user: User, bubble: Bubble, *, deliver_even_if_refused: bool = False) -> tuple[bool, str | None]:
+        """The user taps Pay on an invoice: pre_checkout_query, then successful_payment if the bot said ok.
+
+        Returns (ok, error_message) from the bot's answerPreCheckoutQuery. The bot must answer it.
+        """
+        invoice = bubble.invoice
+        assert invoice is not None, "not an invoice message"
+        query_id = str(self.api.next_id())
+        query = PreCheckoutQuery(
+            id=query_id, from_user=user, currency=invoice["currency"], total_amount=invoice["total"],
+            invoice_payload=invoice["payload"],
+        )
+        await self.dp.feed_update(self.bot, Update(update_id=next(self._updates), pre_checkout_query=query))
+        assert query_id in self.api.pre_checkout_answers, "the bot did not answer the pre-checkout query (10 s limit)"
+        ok, error = self.api.pre_checkout_answers[query_id]
+        if ok or deliver_even_if_refused:
+            await self.deliver_payment(user, invoice)
+        return ok, error
+
+    async def deliver_payment(self, user: User, invoice: dict[str, Any], charge_id: str | None = None) -> str:
+        """Sends the successful_payment service message. The same charge_id again simulates a redelivery."""
+        charge_id = charge_id or f"charge_{self.api.next_id()}"
+        stars = invoice["currency"] == "XTR"
+        if stars:
+            self.api.star_charges[charge_id] = user.id
+        payment = SuccessfulPayment(
+            currency=invoice["currency"],
+            total_amount=invoice["total"],
+            invoice_payload=invoice["payload"],
+            telegram_payment_charge_id=charge_id,
+            provider_payment_charge_id="" if stars else f"prov_{charge_id}",
+        )
+        message = Message(
+            message_id=self.api.next_id(),
+            date=datetime.now(timezone.utc),
+            chat=Chat(id=user.id, type="private", first_name=user.first_name),
+            from_user=user,
+            successful_payment=payment,
+        )
+        await self.dp.feed_update(self.bot, Update(update_id=next(self._updates), message=message))
+        return charge_id
 
     async def _press(self, user: User, bubble: Bubble, data: str) -> None:
         query_id = str(self.api.next_id())

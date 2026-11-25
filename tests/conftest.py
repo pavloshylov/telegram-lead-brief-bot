@@ -34,7 +34,7 @@ async def env_en(tmp_path):
         yield harness
 
 
-async def _make_env(tmp_path, language: str):
+async def _make_env(tmp_path, language: str, **extra):
     """TEST_DATABASE_URL lets the same suite run against PostgreSQL."""
     url = os.environ.get("TEST_DATABASE_URL") or f"sqlite+aiosqlite:///{(tmp_path / 'test.db').as_posix()}"
     engine = make_engine(url)
@@ -49,7 +49,7 @@ async def _make_env(tmp_path, language: str):
         await repo.seed_defaults(session)
         await session.commit()
     settings = Settings(bot_token="42:TEST", admin_ids=frozenset({ADMIN_ID}), company_name="Northwind Studio",
-                        broadcast_rate=0, language=language)
+                        broadcast_rate=0, language=language, **extra)
     api = FakeTelegram()
     harness = Harness(build_dispatcher(settings, session_maker), api)
     harness.session_maker = session_maker
@@ -59,6 +59,27 @@ async def _make_env(tmp_path, language: str):
     # Module-level routers can be attached to one dispatcher at a time; detach them for the next test.
     for router in routers():
         router._parent_router = None
+
+
+@pytest_asyncio.fixture
+async def env_pay(tmp_path):
+    """Payments on: card (test provider token) and Telegram Stars."""
+    async for harness in _make_env(tmp_path, "en", payments_provider_token="TEST:provider-token", payments_stars=True):
+        yield harness
+
+
+@pytest_asyncio.fixture
+async def env_card(tmp_path):
+    """Card payments only."""
+    async for harness in _make_env(tmp_path, "en", payments_provider_token="TEST:provider-token"):
+        yield harness
+
+
+@pytest_asyncio.fixture
+async def env_stars(tmp_path):
+    """Stars only."""
+    async for harness in _make_env(tmp_path, "en", payments_stars=True):
+        yield harness
 
 
 @pytest.fixture
